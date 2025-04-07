@@ -1,8 +1,9 @@
-package adapters
+package raftcluster
 
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 
 	"time"
 
@@ -24,12 +25,35 @@ func (cluster *RaftCluster) StartCluster(n int) error {
 
 	for i := 0; i < n; i++ {
 		addr := fmt.Sprint("127.0.0.1:", 9000+i)
-		id := fmt.Sprintf("%v", i+1)
+		id := fmt.Sprintf("node%v", i+1)
 		node, err := CreateNode(id, addr)
 		if err != nil {
 			return fmt.Errorf("error: %v", err)
 		}
 		cluster.Cluster = append(cluster.Cluster, node)
+	}
+
+	config := raft.Configuration{
+		Servers: []raft.Server{
+			{
+				ID:      raft.ServerID("node1"),
+				Address: raft.ServerAddress("127.0.0.1:9001"),
+			},
+		},
+	}
+	future := cluster.Cluster[0].Node.BootstrapCluster(config)
+	if err := future.Error(); err != nil {
+		log.Fatal("error bootstraping to cluster")
+	}
+
+	// Add Node 2
+	if err := cluster.Cluster[0].Node.AddVoter("node2", "127.0.0.1:9002", 0, 0).Error(); err != nil {
+		log.Fatalf("Failed to add node2: %v", err)
+	}
+
+	// Add Node 3
+	if err := cluster.Cluster[0].Node.AddVoter("node3", "127.0.0.1:9003", 0, 0).Error(); err != nil {
+		log.Fatalf("Failed to add node3: %v", err)
 	}
 
 	return nil
@@ -79,7 +103,7 @@ func CreateNode(id, addr string) (*models.RaftNode, error) {
 	return raftNode, nil
 }
 
-func (cluster *RaftCluster) SendValueToCluster(kv *models.KVPair) error {
+func (cluster *RaftCluster) SendValueToCluster(cmd *models.Command) error {
 	errchan := make(chan error, 1)
 	nodechan := make(chan *models.RaftNode, 1)
 
@@ -106,8 +130,8 @@ func (cluster *RaftCluster) SendValueToCluster(kv *models.KVPair) error {
 		return fmt.Errorf("timeout waiting for leader")
 	}
 
-	go func(kv *models.KVPair, node *models.RaftNode) {
-		bytes, err := json.Marshal(kv)
+	go func(cmd *models.Command, node *models.RaftNode) {
+		bytes, err := json.Marshal(cmd)
 		if err != nil {
 			errchan <- fmt.Errorf("failed to marshal: %v", err)
 			return
@@ -120,7 +144,7 @@ func (cluster *RaftCluster) SendValueToCluster(kv *models.KVPair) error {
 		}
 
 		errchan <- nil
-	}(kv, node)
+	}(cmd, node)
 
 	return <-errchan
 }
