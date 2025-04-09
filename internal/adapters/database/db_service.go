@@ -5,6 +5,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/Isaac-Franklyn/dist-kvstore/internal/domain/models"
 	"github.com/hashicorp/go-hclog"
 )
 
@@ -34,5 +35,34 @@ func (db *DbInstance) CreateTable() error {
 	}
 
 	logger.Info("Successfully created table", "table", "dist_kvstore")
+	return nil
+}
+
+func (db *DbInstance) SaveToDb(val *models.KVPair) error {
+
+	logger := hclog.New(&hclog.LoggerOptions{
+		Name:   "SaveTaskToDb",
+		Level:  hclog.Debug,
+		Output: os.Stdout,
+	})
+
+	key := val.Key
+	value := val.Value
+	timestamp := time.Now()
+
+	str := `
+	INSERT INTO dist_kvstore (key, value, timestamp)
+	VALUES ($1, $2, $3)`
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	result, err := db.Db.ExecContext(ctx, str, key, value, timestamp)
+	if err != nil {
+		logger.Error("error Saving value to Db", "error", err)
+		return err
+	}
+
+	logger.Info("successfully saved value to db", "result", result)
 	return nil
 }
