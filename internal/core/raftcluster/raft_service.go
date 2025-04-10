@@ -30,7 +30,40 @@ func NewRaftCluster() *RaftCluster {
 	}
 }
 
-func (c *RaftCluster) StartCluster(RAFT_PEERS, RAFT_ADDR, RAFT_PORT, DATA_DIR string, db ports.DbConfig) error {
+func (c *RaftCluster) StartCluster(RAFT_PEERS, RAFT_ADDR, RAFT_PORT, DATA_DIR string,
+	db ports.DbConfig,
+	nodeHBtimeout_inms,
+	nodeElectimeout_insecs,
+	nodeSnapshotInterval_insecs,
+	nodeSnapshotthreshold,
+	nodeCommittimeout_inms string) error {
+
+	// Converting environment variables to strings.
+	nodeHBTO_inms, err := strconv.Atoi(nodeHBtimeout_inms)
+	if err != nil {
+		c.logger.Error("error converting nodeheartbeat timout to int", "error", err)
+		return fmt.Errorf("error converting nodeheartbeat timeout to int: %w", err)
+	}
+	nodeElecTO_insecs, err := strconv.Atoi(nodeElectimeout_insecs)
+	if err != nil {
+		c.logger.Error("error converting node election timout to int", "error", err)
+		return fmt.Errorf("error converting nodeelection timeout to int: %w", err)
+	}
+	nodeSSInterval_insecs, err := strconv.Atoi(nodeSnapshotInterval_insecs)
+	if err != nil {
+		c.logger.Error("error converting nodeSnapshot interval timout to int", "error", err)
+		return fmt.Errorf("error converting nodeSnapshot interval timeout to int: %w", err)
+	}
+	nodeSSthreshold, err := strconv.Atoi(nodeSnapshotthreshold)
+	if err != nil {
+		c.logger.Error("error converting nodesnapshot threshold to int", "error", err)
+		return fmt.Errorf("error converting nodesnapshhot threshold to int: %w", err)
+	}
+	nodeCommTO_inms, err := strconv.Atoi(nodeCommittimeout_inms)
+	if err != nil {
+		c.logger.Error("error converting nodecommit timeout to int", "error", err)
+		return fmt.Errorf("error converting nodecommit timeout to int: %w", err)
+	}
 
 	// Converting the number of peers from string to int
 	raftPeers, err := strconv.Atoi(RAFT_PEERS)
@@ -76,7 +109,18 @@ func (c *RaftCluster) StartCluster(RAFT_PEERS, RAFT_ADDR, RAFT_PORT, DATA_DIR st
 	for i := 0; i < raftPeers; i++ {
 		addr := fmt.Sprintf("%v:%v", RAFT_ADDR, raftPort+i)
 		id := fmt.Sprintf("node-%v", i+1)
-		node, err := CreateRaftNode(addr, id, logstorepath, stablestorepath, snapshotstorepath, i, db)
+		node, err := CreateRaftNode(addr,
+			id,
+			logstorepath,
+			stablestorepath,
+			snapshotstorepath,
+			i,
+			db,
+			nodeHBTO_inms,
+			nodeElecTO_insecs,
+			nodeSSInterval_insecs,
+			nodeSSthreshold,
+			nodeCommTO_inms)
 		if err != nil {
 			c.logger.Error("error creating node", "id", id, "error", err)
 			return fmt.Errorf("error creating node of id: %v, error: %w", id, err)

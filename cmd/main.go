@@ -40,6 +40,12 @@ func main() {
 	dbName := os.Getenv("DB_NAME")
 	dbHost := os.Getenv("DB_HOST")
 
+	// Environment variables for node creation.
+	nodeHBtimeout_inms := os.Getenv("NODE_HEARTBEAT_TIMEOUT_IN_MS")
+	nodeElectimeout_insecs := os.Getenv("NODE_ELECTION_TIMEOUT_IN_SECS")
+	nodeSnapshotInterval_insecs := os.Getenv("NODE_SNAPSHOT_INTERVAL_IN_SECS")
+	nodeSnapshotthreshold := os.Getenv("NODE_SNAPSHOT_THRESHOLD")
+	nodeCommittimeout_inms := os.Getenv("NODE_COMMIT_TIMEOUT_IN_MS")
 	// Start the Db Server
 	db, err := database.NewDbInstance(dbUserName, dbPassword, dbPort, dbName, dbHost)
 	if err != nil {
@@ -56,7 +62,17 @@ func main() {
 
 	// Start the Raft Cluster
 	raftCluster := raftcluster.NewRaftCluster()
-	raftCluster.StartCluster(raftPeers, raftAddr, raftPort, dataDir, db)
+	raftCluster.StartCluster(
+		raftPeers,
+		raftAddr,
+		raftPort,
+		dataDir,
+		db,
+		nodeHBtimeout_inms,
+		nodeElectimeout_insecs,
+		nodeSnapshotInterval_insecs,
+		nodeSnapshotthreshold,
+		nodeCommittimeout_inms)
 	logger.Info("Successfully Started the Raft Cluster Nodes", "listening on...", "port", raftPort)
 
 	// Start the HTTP Server

@@ -14,9 +14,10 @@ import (
 	raftboltdb "github.com/hashicorp/raft-boltdb"
 )
 
-func CreateRaftNode(addr, id, logstorepath, stablestorepath, snapshotstorepath string, i int, db ports.DbConfig) (*models.RaftNode, error) {
-
-	randomnumber := 100 * (i + 1)
+func CreateRaftNode(addr, id, logstorepath, stablestorepath, snapshotstorepath string,
+	i int,
+	db ports.DbConfig,
+	nodeHBTO_inms, nodeElecTO_insecs, nodeSSinterval_insecs, nodeSSthreshold, nodeCommTO_inms int) (*models.RaftNode, error) {
 
 	logger := hclog.New(&hclog.LoggerOptions{
 		Name:       id,
@@ -28,11 +29,11 @@ func CreateRaftNode(addr, id, logstorepath, stablestorepath, snapshotstorepath s
 	config := raft.DefaultConfig()
 	config.LocalID = raft.ServerID(id)
 	config.Logger = logger
-	config.CommitTimeout = time.Millisecond * 100
-	config.ElectionTimeout = time.Second * 5
-	config.HeartbeatTimeout = time.Millisecond * time.Duration(randomnumber)
-	config.SnapshotInterval = time.Second * 10
-	config.SnapshotThreshold = 2
+	config.CommitTimeout = time.Millisecond * time.Duration(nodeCommTO_inms)
+	config.ElectionTimeout = time.Second * time.Duration(nodeElecTO_insecs)
+	config.HeartbeatTimeout = time.Millisecond * time.Duration(nodeHBTO_inms)
+	config.SnapshotInterval = time.Second * time.Duration(nodeSSinterval_insecs)
+	config.SnapshotThreshold = uint64(nodeSSthreshold)
 
 	// Creating a TCP Transport
 	advAddr, err := net.ResolveTCPAddr("tcp", addr)
