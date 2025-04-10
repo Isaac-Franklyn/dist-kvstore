@@ -14,7 +14,7 @@ import (
 	raftboltdb "github.com/hashicorp/raft-boltdb"
 )
 
-func CreateRaftNode(addr, id, Datadir string, i int, db ports.DbConfig) (*models.RaftNode, error) {
+func CreateRaftNode(addr, id, logstorepath, stablestorepath, snapshotstorepath string, i int, db ports.DbConfig) (*models.RaftNode, error) {
 
 	randomnumber := 100 * (i + 1)
 
@@ -47,13 +47,7 @@ func CreateRaftNode(addr, id, Datadir string, i int, db ports.DbConfig) (*models
 	}
 
 	// Creating a Stable Store
-	stabledir := Datadir + "/raft-stablestore"
-	stablepath := fmt.Sprintf("%v/%v.bolt", stabledir, id)
-	if err := os.MkdirAll(stablepath, 0700); err != nil {
-		logger.Error("failed to create directory", "directory", stablepath, "error", err)
-		return nil, fmt.Errorf("failed to create parent directory: %v", err)
-	}
-
+	stablepath := fmt.Sprintf("%v/%v.bolt", stablestorepath, id)
 	stableStore, err := raftboltdb.NewBoltStore(stablepath)
 	if err != nil {
 		logger.Error("error creating stable store with file path: ", stablepath)
@@ -61,13 +55,7 @@ func CreateRaftNode(addr, id, Datadir string, i int, db ports.DbConfig) (*models
 	}
 
 	// Creating a Log Store
-	logdir := Datadir + "/raft-logstore"
-	logpath := fmt.Sprintf("%v/%v.bolt", logdir, id)
-	if err := os.MkdirAll(logpath, 0700); err != nil {
-		logger.Error("failed to create directory", logpath, "error", err)
-		return nil, fmt.Errorf("failed to create parent directory: %v", err)
-	}
-
+	logpath := fmt.Sprintf("%v/%v.bolt", logstorepath, id)
 	logstore, err := raftboltdb.NewBoltStore(logpath)
 	if err != nil {
 		logger.Error("error creating log-store with filepath: ", logpath)
@@ -75,14 +63,7 @@ func CreateRaftNode(addr, id, Datadir string, i int, db ports.DbConfig) (*models
 	}
 
 	// Creating snapshot dir
-	snapdir := Datadir + "/raft-snapstore"
-	snappath := fmt.Sprintf("%v/%v", snapdir, id)
-	if err := os.MkdirAll(snappath, 0700); err != nil {
-		logger.Error("failed to create snapshot directory", "path", snappath, "error", err)
-		return nil, fmt.Errorf("failed to create snapshot directory: %v", err)
-	}
-
-	// Create the snapshot store
+	snappath := fmt.Sprintf("%v/%v", snapshotstorepath, id)
 	snapstore, err := raft.NewFileSnapshotStore(snappath, 2, os.Stderr)
 	if err != nil {
 		logger.Error("error creating snapstore with file path: ", snappath)
@@ -94,7 +75,7 @@ func CreateRaftNode(addr, id, Datadir string, i int, db ports.DbConfig) (*models
 	node, err := raft.NewRaft(config, fsm, logstore, stableStore, snapstore, transport)
 	if err != nil {
 		logger.Error("failed to created node: ", id)
-		os.Exit(1)
+		return nil, fmt.Errorf("error creating node with configurations: %w", err)
 	}
 
 	raftNode := &models.RaftNode{
@@ -112,5 +93,4 @@ func CreateRaftNode(addr, id, Datadir string, i int, db ports.DbConfig) (*models
 	}
 
 	return raftNode, nil
-
 }

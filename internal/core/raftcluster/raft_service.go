@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 
@@ -16,42 +17,69 @@ import (
 
 type RaftCluster struct {
 	Cluster []*models.RaftNode
+	logger  hclog.Logger
 }
 
 func NewRaftCluster() *RaftCluster {
-	return &RaftCluster{}
+	return &RaftCluster{
+		logger: hclog.New(&hclog.LoggerOptions{
+			Name:   "Cluster Service",
+			Level:  hclog.Debug,
+			Output: os.Stdout,
+		}),
+	}
 }
 
 func (c *RaftCluster) StartCluster(RAFT_PEERS, RAFT_ADDR, RAFT_PORT, DATA_DIR string, db ports.DbConfig) error {
 
-	logger := hclog.New(&hclog.LoggerOptions{
-		Name:  "Cluster Service",
-		Level: hclog.Debug,
-	})
-
+	// Converting the number of peers from string to int
 	raftPeers, err := strconv.Atoi(RAFT_PEERS)
 	if err != nil {
-		logger.Error("error converting RAFT_PEERS to int, RAFT_PEERS: %v", RAFT_PEERS)
-		os.Exit(1)
-	}
-	raftPort, err := strconv.Atoi(RAFT_PORT)
-	if err != nil {
-		logger.Error("error converting RAFT_PEERS to int, RAFT_PORT: %v", RAFT_PORT)
-		os.Exit(1)
+		c.logger.Error("error converting RAFT_PEERS to int, RAFT_PEERS: %v", RAFT_PEERS)
+		return fmt.Errorf("error converting RAFT_PEERS to int: %w", err)
 	}
 
+	// had to be converted to int because of the fact that it will be different for different nodes
+	raftPort, err := strconv.Atoi(RAFT_PORT)
+	if err != nil {
+		c.logger.Error("error converting RAFT_PORT to int, RAFT_PORT: %v", RAFT_PORT)
+		return fmt.Errorf("error converting RAFT_PORT to int: %w", err)
+	}
+
+	// Creating raft-data dir for storing logstores, stablestores, snapshot store
 	if err := os.MkdirAll(DATA_DIR, 0700); err != nil {
-		logger.Error("Failed to create data directory", "path", DATA_DIR, "error", err)
-		os.Exit(1)
+		c.logger.Error("Failed to create data directory", "path", DATA_DIR, "error", err)
+		return fmt.Errorf("error failing to create data directory: %w", err)
+	}
+
+	// Creating directory for LogStores
+	logstorepath := filepath.Join(DATA_DIR, "/logstore")
+	if err := os.MkdirAll(logstorepath, 0700); err != nil {
+		c.logger.Error("Failed to create log store directory", "path", logstorepath, "error", err)
+		return fmt.Errorf("error failing to create log store directory: %w", err)
+	}
+
+	// Creating directory for Stable Stores
+	stablestorepath := filepath.Join(DATA_DIR, "/stablestore")
+	if err := os.MkdirAll(stablestorepath, 0700); err != nil {
+		c.logger.Error("Failed to create stable store directory", "path", stablestorepath, "error", err)
+		return fmt.Errorf("error failing to create stable store directory: %w", err)
+	}
+
+	// Creating directorty for Snapshots
+	snapshotstorepath := filepath.Join(DATA_DIR, "/snapshotstore")
+	if err := os.MkdirAll(snapshotstorepath, 0700); err != nil {
+		c.logger.Error("Failed to create snapshot store directory", "path", snapshotstorepath, "error", err)
+		return fmt.Errorf("error failing to create snapshot store directory: %w", err)
 	}
 
 	for i := 0; i < raftPeers; i++ {
 		addr := fmt.Sprintf("%v:%v", RAFT_ADDR, raftPort+i)
 		id := fmt.Sprintf("node-%v", i+1)
-		node, err := CreateRaftNode(addr, id, DATA_DIR, i, db)
+		node, err := CreateRaftNode(addr, id, logstorepath, stablestorepath, snapshotstorepath, i, db)
 		if err != nil {
-			logger.Error("error creating node", "id", id, "error", err)
-			os.Exit(1)
+			c.logger.Error("error creating node", "id", id, "error", err)
+			return fmt.Errorf("error creating node of id: %v, error: %w", id, err)
 		}
 		c.Cluster = append(c.Cluster, node)
 	}
@@ -68,10 +96,10 @@ func (c *RaftCluster) StartCluster(RAFT_PEERS, RAFT_ADDR, RAFT_PORT, DATA_DIR st
 	}
 	c.Cluster[0].IsJoined = true
 
-	logger.Info("Waiting for leader election....")
+	c.logger.Info("Waiting for leader election....")
 	time.Sleep(time.Second * 1)
 
-	logger.Info("Leader elected", "leaderAddr", c.Cluster[0].Node.Leader())
+	c.logger.Info("Leader elected", "leaderAddr", c.Cluster[0].Node.Leader())
 
 	for i := 1; i < raftPeers; i++ {
 		addFuture := c.Cluster[0].Node.AddVoter(
@@ -80,15 +108,16 @@ func (c *RaftCluster) StartCluster(RAFT_PEERS, RAFT_ADDR, RAFT_PORT, DATA_DIR st
 			0,
 			0,
 		)
+
 		if err := addFuture.Error(); err != nil {
-			logger.Error("error adding node to the server", "node", c.Cluster[i].Id, "addr", c.Cluster[i].NodeAddr)
-			os.Exit(1)
+			c.logger.Error("error adding node to the server", "node", c.Cluster[i].Id, "addr", c.Cluster[i].NodeAddr)
+			return fmt.Errorf("error adding node to the server: %w", err)
 		}
 		c.Cluster[i].IsJoined = true
-		logger.Info("successfully added node to the server", "node", c.Cluster[i].Id, "addr", c.Cluster[i].NodeAddr)
+		c.logger.Info("successfully added node to the server", "node", c.Cluster[i].Id, "addr", c.Cluster[i].NodeAddr)
 	}
 
-	logger.Info("successfuly bootstraped the first node...")
+	c.logger.Info("successfuly bootstraped the first node...")
 
 	return nil
 }
@@ -115,12 +144,6 @@ func (c *RaftCluster) GetLeader() (*models.RaftNode, error) {
 
 func (c *RaftCluster) SendValueToCluster(val *models.KVPair) error {
 
-	logger := hclog.New(&hclog.LoggerOptions{
-		Name:   "SendValueToCluster",
-		Level:  hclog.Debug,
-		Output: os.Stdout,
-	})
-
 	leaderchan := make(chan *models.RaftNode, 1)
 	errchan := make(chan error, 1)
 
@@ -144,7 +167,7 @@ func (c *RaftCluster) SendValueToCluster(val *models.KVPair) error {
 	node := <-leaderchan
 	err := <-errchan
 	if err != nil || node == nil {
-		logger.Error("timeout getting leader", "error", err, "node", node)
+		c.logger.Error("timeout getting leader", "error", err, "node", node)
 		return err
 	}
 
@@ -153,7 +176,7 @@ func (c *RaftCluster) SendValueToCluster(val *models.KVPair) error {
 	// Marshal the data
 	byteValue, err := json.Marshal(val)
 	if err != nil {
-		logger.Error("failed to marshal val to bytes", "value", val, "error", err)
+		c.logger.Error("failed to marshal val to bytes", "value", val, "error", err)
 	}
 
 	// Apply the byte value to the leader node
@@ -163,13 +186,13 @@ func (c *RaftCluster) SendValueToCluster(val *models.KVPair) error {
 		applyFuture := node.Node.Apply(byteValue, time.Second*2)
 		if err := applyFuture.Error(); err != nil {
 			back_off := math.Pow(i, 3.0)*10 + 100
-			logger.Info("error applying to leader", "leader", node.Id, "value", val, "error", err)
-			logger.Info("Retrying Apply to Leader...", "leader", node.Id, "Value", val, "retry", i)
+			c.logger.Info("error applying to leader", "leader", node.Id, "value", val, "error", err)
+			c.logger.Info("Retrying Apply to Leader...", "leader", node.Id, "Value", val, "retry", i)
 			time.Sleep(time.Millisecond * time.Duration(back_off))
 			i++
 			continue
 		}
-		logger.Info("Successfully applied data to the cluster", "leader", node.Id, "value", val)
+		c.logger.Info("Successfully applied data to the cluster", "leader", node.Id, "value", val)
 		return nil
 	}
 
